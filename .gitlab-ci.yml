@@ -1,0 +1,71 @@
+image: python:3.12-slim
+
+stages:
+  - test
+  - secure
+  - package
+  - govern
+
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PYTHONDONTWRITEBYTECODE: "1"
+
+cache:
+  key: "$CI_COMMIT_REF_SLUG"
+  paths:
+    - .cache/pip/
+
+test:
+  stage: test
+  before_script:
+    - python -m pip install -r requirements.txt -r requirements-dev.txt
+  script:
+    - python -m pytest -q --junitxml=pytest-report.xml
+  artifacts:
+    when: always
+    reports:
+      junit: pytest-report.xml
+    paths:
+      - pytest-report.xml
+    expire_in: 7 days
+
+lint:
+  stage: test
+  before_script:
+    - python -m pip install ruff
+  script:
+    - ruff check app.py test_app.py
+
+dependency-audit:
+  stage: secure
+  before_script:
+    - python -m pip install pip-audit
+  script:
+    - pip-audit -r requirements.txt
+
+semgrep:
+  stage: secure
+  before_script:
+    - python -m pip install semgrep
+  script:
+    - semgrep scan --config p/python --error app.py test_app.py
+
+package:
+  stage: package
+  before_script:
+    - python -m pip install -r requirements-dev.txt
+  script:
+    - python -m build
+  artifacts:
+    paths:
+      - dist/
+    expire_in: 7 days
+
+governance:
+  stage: govern
+  script:
+    - python -c "from pathlib import Path; assert Path('LICENSE').is_file(), 'MIT LICENSE is missing'; assert Path('AGENTS.md').is_file(), 'Agent policy is missing'; print('Governance checks passed')"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
