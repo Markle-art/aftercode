@@ -47,8 +47,7 @@ semgrep:
   before_script:
     - python -m pip install semgrep
   script:
-    - python -m semgrep scan --config p/python --error app.py test_app.py
-
+    - semgrep scan --config p/python --error app.py test_app.py
 package:
   stage: package
   before_script:
