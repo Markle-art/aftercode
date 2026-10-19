@@ -159,3 +159,73 @@ def security_analyst(request: InvestigationRequest):
             "It does not run security scans or prove the application is secure."
         ),
     }
+
+@app.post("/api/release-passport")
+def release_passport(request: InvestigationRequest):
+    check_records = []
+    findings = []
+
+    for check in request.checks:
+        check_records.append(
+            {
+                "name": check.name,
+                "status": check.status,
+                "evidence": check.evidence or None,
+            }
+        )
+
+        if check.status == "failed":
+            findings.append(
+                {
+                    "check": check.name,
+                    "status": "failed",
+                    "evidence": (
+                        check.evidence
+                        or "The check failed without additional evidence."
+                    ),
+                }
+            )
+        elif check.status == "not_run":
+            findings.append(
+                {
+                    "check": check.name,
+                    "status": "not_run",
+                    "evidence": (
+                        check.evidence
+                        or "The check has not run; its result is unknown."
+                    ),
+                }
+            )
+
+    passed = sum(c.status == "passed" for c in request.checks)
+    failed = sum(c.status == "failed" for c in request.checks)
+    not_run = sum(c.status == "not_run" for c in request.checks)
+
+    if failed:
+        decision = "blocked"
+    elif not_run:
+        decision = "pending"
+    else:
+        decision = "ready_for_human_review"
+
+    return {
+        "product": "AfterCode",
+        "artifact": "release_passport",
+        "commit": request.commit,
+        "decision": decision,
+        "release_approved": False,
+        "summary": {
+            "total_checks": len(request.checks),
+            "passed": passed,
+            "failed": failed,
+            "not_run": not_run,
+        },
+        "checks": check_records,
+        "findings": findings,
+        "human_action_required": True,
+        "decision_policy": (
+            "A failed check blocks the recommendation. "
+            "An unrun check keeps it pending. "
+            "Passing submitted checks permits human review only."
+        ),
+    }

@@ -110,3 +110,67 @@ def test_security_analyst_does_not_treat_missing_scan_as_safe():
     assert result["assessment"] == "incomplete"
     assert result["checks_not_run"] == 1
     assert result["release_approved"] is False
+
+
+def test_release_passport_blocks_failed_check():
+    response = client.post(
+        "/api/release-passport",
+        json={
+            "commit": "passport-demo-001",
+            "checks": [
+                {"name": "pytest", "status": "passed"},
+                {
+                    "name": "semgrep",
+                    "status": "failed",
+                    "evidence": "A security finding was reported.",
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["decision"] == "blocked"
+    assert result["summary"]["failed"] == 1
+    assert result["release_approved"] is False
+    assert result["human_action_required"] is True
+
+
+def test_release_passport_keeps_unrun_check_pending():
+    response = client.post(
+        "/api/release-passport",
+        json={
+            "commit": "passport-demo-002",
+            "checks": [
+                {"name": "pytest", "status": "passed"},
+                {"name": "dependency-audit", "status": "not_run"},
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["decision"] == "pending"
+    assert result["summary"]["not_run"] == 1
+    assert result["release_approved"] is False
+
+
+def test_release_passport_requires_human_review_when_checks_pass():
+    response = client.post(
+        "/api/release-passport",
+        json={
+            "commit": "passport-demo-003",
+            "checks": [
+                {"name": "pytest", "status": "passed"},
+                {"name": "semgrep", "status": "passed"},
+                {"name": "dependency-audit", "status": "passed"},
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["decision"] == "ready_for_human_review"
+    assert result["summary"]["passed"] == 3
+    assert result["release_approved"] is False
+    assert result["human_action_required"] is True
