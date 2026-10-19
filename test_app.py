@@ -174,3 +174,45 @@ def test_release_passport_requires_human_review_when_checks_pass():
     assert result["summary"]["passed"] == 3
     assert result["release_approved"] is False
     assert result["human_action_required"] is True
+
+
+def test_ci_log_investigator_returns_evidence_and_line_number():
+    response = client.post(
+        "/api/agents/ci-investigator",
+        json={
+            "log": (
+                "Preparing environment\n"
+                "FAILED test_app.py::test_health - AssertionError\n"
+            )
+        },
+    )
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["agent"] == "ci-investigator"
+    assert result["status"] == "findings_detected"
+    assert result["findings"][0]["category"] == "test_failure"
+    assert result["findings"][0]["line_number"] == 2
+    assert result["human_review_required"] is True
+
+
+def test_ci_log_investigator_does_not_invent_findings():
+    response = client.post(
+        "/api/agents/ci-investigator",
+        json={"log": "Preparing environment\nDownloading dependencies\n"},
+    )
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["status"] == "unknown"
+    assert result["findings"] == []
+    assert result["human_review_required"] is True
+
+
+def test_ci_log_investigator_rejects_oversized_log():
+    response = client.post(
+        "/api/agents/ci-investigator",
+        json={"log": "x" * 2_000_001},
+    )
+
+    assert response.status_code == 422

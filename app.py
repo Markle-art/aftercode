@@ -1,8 +1,9 @@
-﻿from typing import Literal
+from typing import Literal
 
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
+from ci_investigator import investigate_ci_log
 from gitlab_integration import router as gitlab_router
 
 app = FastAPI(
@@ -17,6 +18,10 @@ class CheckEvidence(BaseModel):
     status: Literal["passed", "failed", "not_run"]
     evidence: str = Field(default="", max_length=2000)
 
+
+
+class CILogRequest(BaseModel):
+    log: str = Field(max_length=2_000_000)
 
 class InvestigationRequest(BaseModel):
     commit: str = Field(min_length=1, max_length=100)
@@ -232,4 +237,13 @@ def release_passport(request: InvestigationRequest):
         ),
     }
 
+
+
+@app.post("/api/agents/ci-investigator")
+def ci_log_investigator(request: CILogRequest):
+    result = investigate_ci_log(request.log)
+    return {
+        "agent": "ci-investigator",
+        **result,
+    }
 app.include_router(gitlab_router)
