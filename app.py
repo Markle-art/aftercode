@@ -3,6 +3,8 @@
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
+from gitlab_integration import router as gitlab_router
+
 app = FastAPI(
     title="AfterCode",
     description="Evidence-driven DevSecOps investigation and release readiness",
@@ -229,3 +231,5 @@ def release_passport(request: InvestigationRequest):
             "Passing submitted checks permits human review only."
         ),
     }
+
+app.include_router(gitlab_router)
