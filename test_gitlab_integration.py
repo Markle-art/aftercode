@@ -98,3 +98,106 @@ def test_missing_jobs_does_not_approve_release(monkeypatch):
     response = client.get("/api/gitlab/release-passport")
 
     assert response.status_code == 502
+
+
+def test_gitlab_job_trace_returns_log(monkeypatch):
+    def fake_urlopen(request, timeout):
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self, limit):
+                return b"pytest: 15 passed"
+
+        return FakeResponse()
+
+    monkeypatch.setenv("GITLAB_TOKEN", "test-token")
+    monkeypatch.setattr(
+        gitlab_integration,
+        "urlopen",
+        fake_urlopen,
+        raising=False,
+    )
+
+    response = client.get("/api/gitlab/jobs/456/trace")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["job_id"] == 456
+    assert data["trace"] == "pytest: 15 passed"
+    assert data["truncated"] is False
+    assert data["human_review_required"] is True
+
+
+def test_gitlab_job_trace_rejects_nonpositive_id():
+    response = client.get("/api/gitlab/jobs/0/trace")
+
+    assert response.status_code == 400
+
+
+def test_gitlab_job_trace_requires_token(monkeypatch):
+    monkeypatch.delenv("GITLAB_TOKEN", raising=False)
+
+    response = client.get("/api/gitlab/jobs/456/trace")
+
+    assert response.status_code == 503
+
+
+def test_gitlab_job_trace_truncates_large_logs(monkeypatch):
+    def fake_urlopen(request, timeout):
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self, limit):
+                assert limit == 2_000_001
+                return b"x" * limit
+
+        return FakeResponse()
+
+    monkeypatch.setenv("GITLAB_TOKEN", "test-token")
+    monkeypatch.setattr(
+        gitlab_integration,
+        "urlopen",
+        fake_urlopen,
+        raising=False,
+    )
+
+    response = client.get("/api/gitlab/jobs/456/trace")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["trace"]) == 2_000_000
+    assert data["truncated"] is True
+
+
+def test_gitlab_job_trace_handles_missing_job(monkeypatch):
+    from urllib.error import HTTPError
+
+    def fake_urlopen(request, timeout):
+        raise HTTPError(
+            request.full_url,
+            404,
+            "Not Found",
+            {},
+            None,
+        )
+
+    monkeypatch.setenv("GITLAB_TOKEN", "test-token")
+    monkeypatch.setattr(
+        gitlab_integration,
+        "urlopen",
+        fake_urlopen,
+        raising=False,
+    )
+
+    response = client.get("/api/gitlab/jobs/999999/trace")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "GitLab job was not found."

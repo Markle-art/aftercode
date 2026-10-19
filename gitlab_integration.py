@@ -177,3 +177,65 @@ def gitlab_release_passport(ref: str = "main"):
             "production deployment automatically."
         ),
     }
+
+
+@router.get("/api/gitlab/jobs/{job_id}/trace")
+def gitlab_job_trace(job_id: int):
+    if job_id < 1:
+        raise HTTPException(
+            status_code=400,
+            detail="Job ID must be a positive integer.",
+        )
+
+    token = os.getenv("GITLAB_TOKEN")
+    if not token:
+        raise HTTPException(
+            status_code=503,
+            detail="GitLab integration is not configured.",
+        )
+
+    try:
+        request = Request(
+            f"{GITLAB_API}/projects/{quote(PROJECT_PATH, safe='')}"
+            f"/jobs/{job_id}/trace",
+            headers={"PRIVATE-TOKEN": token},
+            method="GET",
+        )
+
+        with urlopen(request, timeout=20) as response:
+            trace = response.read(2_000_001).decode(
+                "utf-8",
+                errors="replace",
+            )
+
+    except HTTPError as exc:
+        if exc.code == 404:
+            raise HTTPException(
+                status_code=404,
+                detail="GitLab job was not found.",
+            ) from None
+        if exc.code in (401, 403):
+            raise HTTPException(
+                status_code=502,
+                detail="GitLab rejected the configured API credentials.",
+            ) from None
+        raise HTTPException(
+            status_code=502,
+            detail="GitLab job trace request failed.",
+        ) from None
+    except (URLError, TimeoutError, OSError):
+        raise HTTPException(
+            status_code=502,
+            detail="Could not retrieve the GitLab job trace.",
+        ) from None
+
+    truncated = len(trace) > 2_000_000
+    trace = trace[:2_000_000]
+
+    return {
+        "job_id": job_id,
+        "source": "GitLab job trace",
+        "trace": trace,
+        "truncated": truncated,
+        "human_review_required": True,
+    }
