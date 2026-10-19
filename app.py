@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
 from ci_investigator import investigate_ci_log
+from gitlab_integration import gitlab_job_trace
 from gitlab_integration import router as gitlab_router
 
 app = FastAPI(
@@ -246,4 +247,21 @@ def ci_log_investigator(request: CILogRequest):
         "agent": "ci-investigator",
         **result,
     }
+
+
+@app.post("/api/agents/ci-investigator/gitlab/{job_id}")
+def investigate_gitlab_job(job_id: int):
+    trace_result = gitlab_job_trace(job_id)
+    investigation = investigate_ci_log(trace_result["trace"])
+
+    return {
+        "agent": "ci-investigator",
+        "source": trace_result["source"],
+        "job_id": trace_result["job_id"],
+        "trace_truncated": trace_result["truncated"],
+        **investigation,
+        "human_review_required": True,
+    }
+
+
 app.include_router(gitlab_router)

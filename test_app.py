@@ -1,5 +1,6 @@
-﻿from fastapi.testclient import TestClient
+from fastapi.testclient import TestClient
 
+import app as app_module
 from app import app
 
 client = TestClient(app)
@@ -216,3 +217,73 @@ def test_ci_log_investigator_rejects_oversized_log():
     )
 
     assert response.status_code == 422
+
+
+def test_gitlab_job_investigation_analyzes_retrieved_trace(monkeypatch):
+    def fake_trace(job_id):
+        assert job_id == 123
+        return {
+            "job_id": job_id,
+            "source": "GitLab job trace",
+            "trace": (
+                "Preparing environment\n"
+                "FAILED test_app.py::test_health - AssertionError\n"
+            ),
+            "truncated": False,
+            "human_review_required": True,
+        }
+
+    monkeypatch.setattr(app_module, "gitlab_job_trace", fake_trace)
+
+    response = client.post("/api/agents/ci-investigator/gitlab/123")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["agent"] == "ci-investigator"
+    assert data["job_id"] == 123
+    assert data["source"] == "GitLab job trace"
+    assert data["trace_truncated"] is False
+    assert data["status"] == "findings_detected"
+    assert data["findings"][0]["category"] == "test_failure"
+    assert data["findings"][0]["line_number"] == 2
+    assert data["human_review_required"] is True
+
+
+def test_gitlab_job_investigation_handles_unrecognized_trace(monkeypatch):
+    monkeypatch.setattr(
+        app_module,
+        "gitlab_job_trace",
+        lambda job_id: {
+            "job_id": job_id,
+            "source": "GitLab job trace",
+            "trace": "Preparing environment\nDownloading dependencies\n",
+            "truncated": False,
+            "human_review_required": True,
+        },
+    )
+
+    response = client.post("/api/agents/ci-investigator/gitlab/456")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["job_id"] == 456
+    assert data["status"] == "unknown"
+    assert data["findings"] == []
+    assert data["human_review_required"] is True
+
+
+def test_gitlab_job_investigation_preserves_trace_errors(monkeypatch):
+    from fastapi import HTTPException
+
+    def fake_trace(job_id):
+        raise HTTPException(
+            status_code=404,
+            detail="GitLab job was not found.",
+        )
+
+    monkeypatch.setattr(app_module, "gitlab_job_trace", fake_trace)
+
+    response = client.post("/api/agents/ci-investigator/gitlab/999")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "GitLab job was not found."
