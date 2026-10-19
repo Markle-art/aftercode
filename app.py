@@ -102,3 +102,60 @@ def investigate(request: InvestigationRequest):
             "The investigator cannot approve a production release."
         ),
     }
+
+@app.post("/api/agents/security-analyst")
+def security_analyst(request: InvestigationRequest):
+    findings = []
+
+    for check in request.checks:
+        if check.status == "failed":
+            findings.append(
+                {
+                    "check": check.name,
+                    "risk": "high",
+                    "status": "failed",
+                    "evidence": (
+                        check.evidence
+                        or "Check failed; supporting details were not supplied."
+                    ),
+                    "action": "Investigate and resolve the failure, then rerun the check.",
+                }
+            )
+        elif check.status == "not_run":
+            findings.append(
+                {
+                    "check": check.name,
+                    "risk": "unknown",
+                    "status": "not_run",
+                    "evidence": (
+                        check.evidence
+                        or "No result is available for this check."
+                    ),
+                    "action": "Run this check before making a release decision.",
+                }
+            )
+
+    failed = sum(c.status == "failed" for c in request.checks)
+    not_run = sum(c.status == "not_run" for c in request.checks)
+
+    if failed:
+        assessment = "risks_detected"
+    elif not_run:
+        assessment = "incomplete"
+    else:
+        assessment = "no_reported_findings"
+
+    return {
+        "agent": "security-analyst",
+        "commit": request.commit,
+        "assessment": assessment,
+        "checks_reviewed": len(request.checks),
+        "failed_checks": failed,
+        "checks_not_run": not_run,
+        "findings": findings,
+        "release_approved": False,
+        "limitation": (
+            "This assessment classifies supplied check results. "
+            "It does not run security scans or prove the application is secure."
+        ),
+    }

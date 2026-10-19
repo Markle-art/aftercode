@@ -69,3 +69,44 @@ def test_investigator_keeps_missing_checks_pending():
     assert result["recommendation"] == "pending"
     assert result["summary"]["not_run"] == 1
     assert result["release_approved"] is False
+
+
+def test_security_analyst_reports_failed_security_check():
+    response = client.post(
+        "/api/agents/security-analyst",
+        json={
+            "commit": "security-demo-001",
+            "checks": [
+                {
+                    "name": "semgrep",
+                    "status": "failed",
+                    "evidence": "A security rule reported a finding.",
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["assessment"] == "risks_detected"
+    assert result["failed_checks"] == 1
+    assert result["findings"][0]["risk"] == "high"
+    assert result["release_approved"] is False
+
+
+def test_security_analyst_does_not_treat_missing_scan_as_safe():
+    response = client.post(
+        "/api/agents/security-analyst",
+        json={
+            "commit": "security-demo-002",
+            "checks": [
+                {"name": "dependency-audit", "status": "not_run"}
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["assessment"] == "incomplete"
+    assert result["checks_not_run"] == 1
+    assert result["release_approved"] is False
