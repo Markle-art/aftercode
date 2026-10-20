@@ -1,4 +1,4 @@
-﻿# AfterCode
+# AfterCode
 
 Agentic automation for the post-code DevSecOps lifecycle using GitLab Duo Agent Platform.
 
@@ -81,6 +81,24 @@ Open these endpoints in your browser:
 - Release readiness: http://127.0.0.1:8000/release-readiness
 
 Stop the development server by pressing Ctrl+C in PowerShell.
+
+## Release Passport Demonstration
+
+Run the reproducible API demonstration from the repository root:
+
+``powershell
+python .\demo_release_passport.py
+``
+
+The demonstration exercises three scenarios:
+
+1. **Blocked:** a failed check prevents release readiness.
+2. **Pending:** unknown CI evidence requires further verification.
+3. **Ready for human review:** checks pass, but human approval is still required.
+
+Each scenario prints its decision explanation and approval flags. The script asserts that no scenario automatically approves a release.
+
+The demonstration uses FastAPI's in-process test client. It does not deploy software or contact a live GitLab job.
 
 ## GitLab CI/CD
 
