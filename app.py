@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
 from ci_investigator import investigate_ci_log
+from evidence_integrity import evidence_fingerprint
 from gitlab_integration import gitlab_job_trace
 from gitlab_integration import router as gitlab_router
 
@@ -324,10 +325,29 @@ def release_passport(request: InvestigationRequest):
         "next_steps": next_steps,
     }
 
+    evidence_snapshot = {
+        "commit": request.commit,
+        "checks": check_records,
+        "ci_evidence": [
+            item.model_dump(mode="json")
+            for item in request.ci_evidence
+        ],
+    }
+    integrity = {
+        "algorithm": "sha256",
+        "fingerprint": evidence_fingerprint(evidence_snapshot),
+        "scope": ["commit", "checks", "ci_evidence"],
+        "verification": "fingerprinted_not_authenticated",
+        "meaning": (
+            "The fingerprint identifies this evidence snapshot. "
+            "It does not prove the evidence is authentic or truthful."
+        ),
+    }
     return {
         "product": "AfterCode",
         "artifact": "release_passport",
         "commit": request.commit,
+        "evidence_integrity": integrity,
         "decision": decision,
         "decision_explanation": decision_explanation,
         "release_approved": False,

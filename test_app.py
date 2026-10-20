@@ -439,3 +439,70 @@ def test_release_passport_explains_human_review_requirement():
     assert explanation["next_steps"]
     assert result["release_approved"] is False
     assert result["human_action_required"] is True
+
+def test_release_passport_includes_evidence_fingerprint():
+    response = client.post(
+        "/api/release-passport",
+        json={
+            "commit": "integrity-demo-001",
+            "checks": [
+                {"name": "pytest", "status": "passed", "evidence": "37 tests passed"},
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    result = response.json()
+    integrity = result["evidence_integrity"]
+
+    assert integrity["algorithm"] == "sha256"
+    assert len(integrity["fingerprint"]) == 64
+    assert integrity["scope"] == ["commit", "checks", "ci_evidence"]
+    assert integrity["verification"] == "fingerprinted_not_authenticated"
+    assert result["decision"] == "ready_for_human_review"
+    assert result["release_approved"] is False
+    assert result["human_action_required"] is True
+
+
+def test_release_passport_fingerprint_is_deterministic():
+    payload = {
+        "commit": "integrity-demo-002",
+        "checks": [
+            {"name": "pytest", "status": "passed", "evidence": "All tests passed"},
+        ],
+    }
+
+    first = client.post("/api/release-passport", json=payload)
+    second = client.post("/api/release-passport", json=payload)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert (
+        first.json()["evidence_integrity"]["fingerprint"]
+        == second.json()["evidence_integrity"]["fingerprint"]
+    )
+
+
+def test_release_passport_fingerprint_changes_when_evidence_changes():
+    base = {
+        "commit": "integrity-demo-003",
+        "checks": [
+            {"name": "pytest", "status": "passed", "evidence": "Original evidence"},
+        ],
+    }
+    changed = {
+        "commit": "integrity-demo-003",
+        "checks": [
+            {"name": "pytest", "status": "passed", "evidence": "Changed evidence"},
+        ],
+    }
+
+    first = client.post("/api/release-passport", json=base)
+    second = client.post("/api/release-passport", json=changed)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert (
+        first.json()["evidence_integrity"]["fingerprint"]
+        != second.json()["evidence_integrity"]["fingerprint"]
+    )
