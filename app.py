@@ -226,6 +226,10 @@ def release_passport(request: InvestigationRequest):
         item.status == "unknown"
         for item in request.ci_evidence
     )
+    ci_incomplete = any(
+        item.status == "findings_detected" and not item.findings
+        for item in request.ci_evidence
+    )
 
     for item in request.ci_evidence:
         if item.status == "findings_detected":
@@ -258,16 +262,74 @@ def release_passport(request: InvestigationRequest):
 
     if failed or ci_findings_detected:
         decision = "blocked"
-    elif not_run or ci_unknown:
+    elif not_run or ci_unknown or ci_incomplete:
         decision = "pending"
     else:
         decision = "ready_for_human_review"
+
+    reasons = []
+    if failed:
+        reasons.append(
+            f"{failed} check(s) failed and require investigation."
+        )
+    if ci_findings_detected:
+        reasons.append(
+            "CI log indicators were detected and require human validation."
+        )
+    if not_run:
+        reasons.append(
+            f"{not_run} check(s) have not run, so their results are unknown."
+        )
+    if ci_unknown:
+        reasons.append("At least one CI result is unknown.")
+    if ci_incomplete:
+        reasons.append(
+            "CI evidence reported findings_detected but contained no findings."
+        )
+
+    if decision == "blocked":
+        explanation_message = (
+            "Release readiness is blocked because failed checks or CI "
+            "indicators require investigation."
+        )
+        next_steps = [
+            "Review the failed checks and CI evidence.",
+            "Validate detected indicators and address confirmed issues.",
+            "Rerun relevant checks before requesting human review.",
+        ]
+    elif decision == "pending":
+        explanation_message = (
+            "Release readiness is pending because some verification "
+            "results are missing, unknown, or incomplete."
+        )
+        next_steps = [
+            "Run checks that have not completed.",
+            "Retrieve or clarify unknown or incomplete CI evidence.",
+            "Reassess the passport after evidence is available.",
+        ]
+    else:
+        explanation_message = (
+            "Submitted checks passed. This passport is ready for human "
+            "review; the release has not been approved."
+        )
+        next_steps = [
+            "Have an authorized human review the evidence.",
+            "Record the release decision through the appropriate approval process.",
+        ]
+
+    decision_explanation = {
+        "code": decision,
+        "message": explanation_message,
+        "reasons": reasons,
+        "next_steps": next_steps,
+    }
 
     return {
         "product": "AfterCode",
         "artifact": "release_passport",
         "commit": request.commit,
         "decision": decision,
+        "decision_explanation": decision_explanation,
         "release_approved": False,
         "summary": {
             "total_checks": len(request.checks),

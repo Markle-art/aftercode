@@ -353,3 +353,89 @@ def test_release_passport_keeps_unknown_ci_result_pending():
     assert result["human_action_required"] is True
     assert result["findings"][0]["job_id"] == 789
     assert result["findings"][0]["status"] == "unknown"
+
+
+def test_release_passport_explains_blocked_ci_findings():
+    response = client.post(
+        "/api/release-passport",
+        json={
+            "commit": "explain-blocked-001",
+            "checks": [{"name": "pytest", "status": "passed"}],
+            "ci_evidence": [
+                {
+                    "source": "gitlab_job_trace",
+                    "job_id": 901,
+                    "status": "findings_detected",
+                    "findings": [{"category": "test_failure"}],
+                    "verification": "not_verified",
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    result = response.json()
+    explanation = result["decision_explanation"]
+
+    assert result["decision"] == "blocked"
+    assert explanation["code"] == "blocked"
+    assert "blocked" in explanation["message"].lower()
+    assert explanation["reasons"]
+    assert explanation["next_steps"]
+    assert result["release_approved"] is False
+
+
+def test_release_passport_explains_incomplete_ci_evidence():
+    response = client.post(
+        "/api/release-passport",
+        json={
+            "commit": "explain-pending-001",
+            "checks": [{"name": "pytest", "status": "passed"}],
+            "ci_evidence": [
+                {
+                    "source": "gitlab_job_trace",
+                    "job_id": 902,
+                    "status": "findings_detected",
+                    "findings": [],
+                    "verification": "not_verified",
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    result = response.json()
+    explanation = result["decision_explanation"]
+
+    assert result["decision"] == "pending"
+    assert explanation["code"] == "pending"
+    assert any(
+        "contained no findings" in reason
+        for reason in explanation["reasons"]
+    )
+    assert explanation["next_steps"]
+    assert result["release_approved"] is False
+
+
+def test_release_passport_explains_human_review_requirement():
+    response = client.post(
+        "/api/release-passport",
+        json={
+            "commit": "explain-review-001",
+            "checks": [
+                {"name": "pytest", "status": "passed"},
+                {"name": "semgrep", "status": "passed"},
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    result = response.json()
+    explanation = result["decision_explanation"]
+
+    assert result["decision"] == "ready_for_human_review"
+    assert explanation["code"] == "ready_for_human_review"
+    assert "human review" in explanation["message"].lower()
+    assert explanation["next_steps"]
+    assert result["release_approved"] is False
+    assert result["human_action_required"] is True
