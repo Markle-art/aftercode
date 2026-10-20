@@ -24,9 +24,18 @@ class CheckEvidence(BaseModel):
 class CILogRequest(BaseModel):
     log: str = Field(max_length=2_000_000)
 
+class CIEvidence(BaseModel):
+    source: Literal["gitlab_job_trace"]
+    job_id: int = Field(ge=1)
+    status: Literal["findings_detected", "unknown"]
+    findings: list[dict] = Field(max_length=100)
+    verification: Literal["not_verified"] = "not_verified"
+
+
 class InvestigationRequest(BaseModel):
     commit: str = Field(min_length=1, max_length=100)
     checks: list[CheckEvidence] = Field(min_length=1, max_length=50)
+    ci_evidence: list[CIEvidence] = Field(default_factory=list, max_length=20)
 
 
 @app.get("/")
@@ -209,9 +218,47 @@ def release_passport(request: InvestigationRequest):
     failed = sum(c.status == "failed" for c in request.checks)
     not_run = sum(c.status == "not_run" for c in request.checks)
 
-    if failed:
+    ci_findings_detected = any(
+        item.status == "findings_detected" and bool(item.findings)
+        for item in request.ci_evidence
+    )
+    ci_unknown = any(
+        item.status == "unknown"
+        for item in request.ci_evidence
+    )
+
+    for item in request.ci_evidence:
+        if item.status == "findings_detected":
+            for ci_finding in item.findings:
+                findings.append(
+                    {
+                        "source": item.source,
+                        "job_id": item.job_id,
+                        "status": "findings_detected",
+                        "verification": item.verification,
+                        "evidence": ci_finding,
+                        "message": (
+                            "A CI log indicator was detected. "
+                            "A human must validate it before acting."
+                        ),
+                    }
+                )
+        else:
+            findings.append(
+                {
+                    "source": item.source,
+                    "job_id": item.job_id,
+                    "status": "unknown",
+                    "verification": item.verification,
+                    "evidence": (
+                        "The CI trace did not establish a verified result."
+                    ),
+                }
+            )
+
+    if failed or ci_findings_detected:
         decision = "blocked"
-    elif not_run:
+    elif not_run or ci_unknown:
         decision = "pending"
     else:
         decision = "ready_for_human_review"
@@ -232,9 +279,11 @@ def release_passport(request: InvestigationRequest):
         "findings": findings,
         "human_action_required": True,
         "decision_policy": (
-            "A failed check blocks the recommendation. "
-            "An unrun check keeps it pending. "
-            "Passing submitted checks permits human review only."
+            "A failed check or detected CI log indicator blocks the recommendation. "
+            "An unrun check or unknown CI result keeps it pending. "
+            "CI indicators are unverified and require human validation. "
+            "Passing submitted checks permits human review only; "
+            "this endpoint never approves a release automatically."
         ),
     }
 

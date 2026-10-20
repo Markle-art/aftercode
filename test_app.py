@@ -287,3 +287,69 @@ def test_gitlab_job_investigation_preserves_trace_errors(monkeypatch):
 
     assert response.status_code == 404
     assert response.json()["detail"] == "GitLab job was not found."
+
+def test_release_passport_blocks_detected_ci_findings():
+    response = client.post(
+        "/api/release-passport",
+        json={
+            "commit": "passport-ci-demo-001",
+            "checks": [
+                {"name": "pytest", "status": "passed"},
+                {"name": "semgrep", "status": "passed"},
+            ],
+            "ci_evidence": [
+                {
+                    "source": "gitlab_job_trace",
+                    "job_id": 456,
+                    "status": "findings_detected",
+                    "findings": [
+                        {
+                            "category": "test_failure",
+                            "title": "Automated test failure",
+                            "line_number": 12,
+                        }
+                    ],
+                    "verification": "not_verified",
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["decision"] == "blocked"
+    assert result["release_approved"] is False
+    assert result["human_action_required"] is True
+    assert result["findings"][0]["source"] == "gitlab_job_trace"
+    assert result["findings"][0]["job_id"] == 456
+    assert result["findings"][0]["verification"] == "not_verified"
+
+
+def test_release_passport_keeps_unknown_ci_result_pending():
+    response = client.post(
+        "/api/release-passport",
+        json={
+            "commit": "passport-ci-demo-002",
+            "checks": [
+                {"name": "pytest", "status": "passed"},
+                {"name": "semgrep", "status": "passed"},
+            ],
+            "ci_evidence": [
+                {
+                    "source": "gitlab_job_trace",
+                    "job_id": 789,
+                    "status": "unknown",
+                    "findings": [],
+                    "verification": "not_verified",
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["decision"] == "pending"
+    assert result["release_approved"] is False
+    assert result["human_action_required"] is True
+    assert result["findings"][0]["job_id"] == 789
+    assert result["findings"][0]["status"] == "unknown"
